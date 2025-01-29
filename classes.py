@@ -32,75 +32,114 @@ class exp_data:
                                                   multiple_correction = True, 
                                                   mc_test:Literal['bonferroni', 'sidak', 'holm', 'fdr_bh'] = 'fdr_bh', 
                                                   mc_alpha = 0.05,
-                                                  plot = True):
+                                                  plot = True,
+                                                  masks = None):
 
-        freq_up_regulated = []
-        freq_down_regulated = []
-        n_total = []
-        freq_no_change = []
+        freq_up_regulated_masks = []
+        freq_down_regulated_masks = []
+        n_total_masks = []
+        freq_no_change_masks = []
 
-        for obj_index in self.session_data_obj:
-            obj = self.session_data_obj[obj_index]
-            obj.return_mask()
-            up_regulated = False
-            obj.test_firing_rate_change_stimulus(parametric_test = parametric_test, one_sided = one_sided, up_regulated = up_regulated,
+        if type(masks) != list:
+            masks = [masks]
+
+        for mask in masks:
+            freq_up_regulated = []
+            freq_down_regulated = []
+            n_total = []
+            freq_no_change = []
+            for obj_index in self.session_data_obj:
+                obj = self.session_data_obj[obj_index]
+                if mask == None:
+                    obj.return_mask()
+                else:
+                    obj.return_mask(**mask)
+                up_regulated = False
+                obj.test_firing_rate_change_stimulus(parametric_test = parametric_test, one_sided = one_sided, up_regulated = up_regulated,
                                                 multiple_correction = multiple_correction, mc_test = mc_test, mc_alpha = mc_alpha)
-            n_total_trial = obj.p_vals['info']['n_total']
-            n_total.append(n_total_trial)
-            
-            n_down_regulated_trial = obj.p_vals['info']['n_significant_mc']
-            freq_down_regulated.append(n_down_regulated_trial / n_total_trial)
-            
-            up_regulated = True
-            obj.test_firing_rate_change_stimulus(parametric_test = parametric_test, one_sided = one_sided, up_regulated = up_regulated,
-                                                multiple_correction = multiple_correction, mc_test = mc_test, mc_alpha = mc_alpha)
-            
-            n_up_regulated_trial = obj.p_vals['info']['n_significant_mc']
-            freq_up_regulated.append(n_up_regulated_trial / n_total_trial)
-
-            no_change_trial = n_total_trial - n_up_regulated_trial - n_down_regulated_trial
-            freq_no_change.append(no_change_trial / n_total_trial)
+                n_total_trial = obj.p_vals['info']['n_total']
+                n_total.append(n_total_trial)
         
-        self.test_firing_rate_change_stimulus_sessions_results = {'freq_up_regulated': freq_up_regulated,
-                                                                  'freq_down_regulated': freq_down_regulated,
-                                                                  'freq_no_change': freq_no_change,
-                                                                  'n_total': n_total,
-                                                                  'info': {'mask': obj.mask_info,
-                                                                           'parametric_test': parametric_test,
-                                                                           'one_sided': one_sided,
-                                                                           'multiple_correction': multiple_correction,
-                                                                           'mc_test': mc_test, 
-                                                                           'mc_alpha': mc_alpha}}
+                n_down_regulated_trial = obj.p_vals['info']['n_significant_mc']
+                freq_down_regulated.append(n_down_regulated_trial / n_total_trial)
+                
+                up_regulated = True
+                obj.test_firing_rate_change_stimulus(parametric_test = parametric_test, one_sided = one_sided, up_regulated = up_regulated,
+                                                multiple_correction = multiple_correction, mc_test = mc_test, mc_alpha = mc_alpha)
+                
+                n_up_regulated_trial = obj.p_vals['info']['n_significant_mc']
+                freq_up_regulated.append(n_up_regulated_trial / n_total_trial)
+                
+                no_change_trial_freq = 1 - n_up_regulated_trial / n_total_trial - n_down_regulated_trial / n_total_trial
+                freq_no_change.append(no_change_trial_freq)
+        
+            freq_up_regulated_masks.append(freq_up_regulated)
+            freq_down_regulated_masks.append(freq_down_regulated)
+            n_total_masks.append(n_total)
+            freq_no_change_masks.append(freq_no_change)
+
+        self.test_firing_rate_change_stimulus_sessions_results = {'freq_up_regulated': freq_up_regulated_masks,
+                                                                        'freq_down_regulated': freq_down_regulated_masks,
+                                                                        'freq_no_change': freq_no_change_masks,
+                                                                        'n_total': n_total_masks,
+                                                                        'info': {'mask': masks,
+                                                                                'parametric_test': parametric_test,
+                                                                                'one_sided': one_sided,
+                                                                                'multiple_correction': multiple_correction,
+                                                                                'mc_test': mc_test, 
+                                                                                'mc_alpha': mc_alpha}}
+
     
         if plot:
             self.plot_firing_rate_change_stimulus_sessions()
     
-    def plot_firing_rate_change_stimulus_sessions(self, figsize = (12,6), xlim = None, ylim = (0,1)):
-        plt.figure(figsize=figsize)
-
-        # Line plots for each category
-        plt.plot(self.session_dates, self.test_firing_rate_change_stimulus_sessions_results['freq_up_regulated'], 
-                 label='Increase', color='green', marker='o')
-        plt.plot(self.session_dates, self.test_firing_rate_change_stimulus_sessions_results['freq_down_regulated'], 
-                 label='Decrease', color='red', marker='o')
-        plt.plot(self.session_dates, self.test_firing_rate_change_stimulus_sessions_results['freq_no_change'], 
-                 label='No Change', color='gray', marker='o')
-
-        # Labels and customization
-        plt.xlabel('Sessions')
-        plt.ylabel('Number of Cells')
+    def plot_firing_rate_change_stimulus_sessions(self, figsize = (12,6), xlim = None, ylim = None):
+        
         session_info = self.test_firing_rate_change_stimulus_sessions_results['info']
-        plt.title(f"Frequency of Significant Changes in Firing Rate  (p < {session_info['mc_alpha']}, {session_info['mc_test']}) across sessions - All Stimuli")
-        plt.xticks(rotation=45)
-        n_total = self.test_firing_rate_change_stimulus_sessions_results['n_total']
-        plt.xticks(self.session_dates, [f"{self.session_dates[i]}\n(n={n_total[i]})" for i in range(len(n_total))], rotation=45, ha='right')
+        colours = ['green', 'red','gray']
 
-        plt.legend()
-        plt.tight_layout()
-        plt.ylim(ylim)
-        plt.xlim(xlim)
+        if len(self.test_firing_rate_change_stimulus_sessions_results['freq_up_regulated']) == 1:
+            fig, axs = plt.subplots(1, 1, figsize = figsize)
+            axs = [axs]
+            plt.suptitle(f"Frequency of Significant Changes in Firing Rate  (p < {session_info['mc_alpha']}; Multiple Correction: {session_info['multiple_correction']}-{session_info['mc_test']}) across sessions - All Stimuli")
+       
+        else:
+            fig, axs = plt.subplots(3,3, figsize = figsize, sharex=True, sharey=True)
+            axs = axs.flatten() if isinstance(axs, np.ndarray) else axs
+
+            x_labels = ['Left', 'Off', 'Right']
+            y_labels = ['Right', 'Center', 'Left']
+            fig.text(0.5, -0.03, 'Visual stimulus', ha='center', fontsize=12)
+            fig.text(-0.03, 0.5, 'Auditory stimulus', va='center', rotation='vertical', fontsize=12)
+            for i in range(3):
+                axs[i+6].set_xlabel(f'{x_labels[i]}')  # x labels for the bottom row
+                axs[3*i].set_ylabel(f'{y_labels[i]}')  # y labels for the left column
+            plt.suptitle(f"Frequency of Significant Changes in Firing Rate  (p < {session_info['mc_alpha']}; Multiple Correction: {session_info['multiple_correction']}-{session_info['mc_test']}) across sessions")
+
+        for i in range(len(self.test_firing_rate_change_stimulus_sessions_results['freq_up_regulated'])):
+            ax = axs[i]
+            ax.bar(self.session_dates, self.test_firing_rate_change_stimulus_sessions_results['freq_up_regulated'][i], 
+                    label='Increased Activity', color = colours[0], alpha = 0.7)
+        
+            ax.bar(self.session_dates, self.test_firing_rate_change_stimulus_sessions_results['freq_down_regulated'][i], 
+                    label='Decreased Activity', color = colours[1], alpha = 0.7,
+                    bottom=self.test_firing_rate_change_stimulus_sessions_results['freq_up_regulated'][i])
+        
+            ax.bar(self.session_dates, self.test_firing_rate_change_stimulus_sessions_results['freq_no_change'][i], 
+                    label = 'No Change', color = colours[2], alpha = 0.7,
+                    bottom=np.array(self.test_firing_rate_change_stimulus_sessions_results['freq_up_regulated'][i])+np.array(self.test_firing_rate_change_stimulus_sessions_results['freq_down_regulated'][i]))
+            if len(self.test_firing_rate_change_stimulus_sessions_results['freq_up_regulated']) > 1:
+                ax.set_xticks([])
+                ax.set_yticks([])
+            else:
+                ax.set_xticks(self.session_dates)
+                ax.set_xticklabels(self.session_dates, rotation = 45)
+
         # Display the plot
+        plt.tight_layout()
         plt.show()
+        
+       
             
 class session_data:
     '''
@@ -313,7 +352,7 @@ class session_data:
                           'vis_loc': vis_loc,
                           'aud_loc': aud_loc}
 
-    def format_spikes(self, baseline_start = -0.5, stimulus_end = 0.5, bin_size = 0.01):
+    def format_spikes(self, baseline_start = -0.5, stimulus_end = 0.5, bin_size = 0.01, normalise = True):
         '''
         Format the spike data for the session. This will create a dictionary of spike times for each neuron.
         '''
@@ -321,9 +360,9 @@ class session_data:
         stimulus_spikes, baseline_spikes = self.extract_spikes(baseline_start)
 
 
-        stimulus_firing_rates, stimulus_times = calculate_firing_rate(stimulus_spikes, bin_size, 
+        stimulus_firing_rates, stimulus_times = calculate_firing_rate(stimulus_spikes, bin_size, normalise = normalise,
                                                                       period_start = 0, period_end = stimulus_end)
-        baseline_firing_rates, baseline_times = calculate_firing_rate(baseline_spikes, bin_size, 
+        baseline_firing_rates, baseline_times = calculate_firing_rate(baseline_spikes, bin_size, normalise = normalise,
                                                                       period_start = baseline_start, period_end = 0)      
         
         
@@ -338,6 +377,16 @@ class session_data:
         self.formatted_data = formatted_spikes
         self.stimulus_times = stimulus_times
         self.baseline_times = baseline_times
+        
+        keys = sorted(baseline_firing_rates.keys())  # Ensure keys are sorted
+        baseline_arrays = [baseline_firing_rates[key] for key in keys]  # Extract arrays in the order of keys
+        stimulus_arrays = [stimulus_firing_rates[key] for key in keys]  # Extract arrays in the order of keys
+
+        baseline_3d = np.stack(baseline_arrays, axis=0)
+        stimulus_3d = np.stack(stimulus_arrays, axis=0)
+        
+        self.formatted_data_array = {'firing_rate': {'baseline': baseline_3d, 'stimulus': stimulus_3d},
+                                     'neuron_ids': keys}
 
     def extract_spikes(self, baseline_start = -0.5):
         '''
@@ -386,6 +435,7 @@ class session_data:
                 if color_based_on is None:
                     total_firing_rates = np.concatenate([neuron_data['firing_rate']['baseline'][self.mask_interest].mean(axis = 0), 
                                             neuron_data['firing_rate']['stimulus'][self.mask_interest].mean(axis = 0)])
+                    
                     average_fr += total_firing_rates
                     if not only_average:
                         ax.plot(total_times[:neuron_data['times']['baseline'].shape[0]+1], total_firing_rates[:neuron_data['times']['baseline'].shape[0]+1], color='gray', alpha=0.5)
@@ -542,8 +592,86 @@ class session_data:
         plt.tight_layout()
         plt.show()
     
+    def plot_spike_raster_table(self, neuron_ids = 1, first_move = True, sort_choice_loc = True, sort_response_time = True,
+                            xlim = (-0.2, 0.5), figsize = (10,6)):
+        masks = [{'aud_loc': 'r', 'vis_loc': 'l'},
+                {'aud_loc': 'c', 'vis_loc': 'l'},
+                {'aud_loc': 'l', 'vis_loc': 'l'},
+                {'aud_loc': 'r', 'vis_loc': 'o'},
+                {'aud_loc': 'c', 'vis_loc': 'o'},
+                {'aud_loc': 'l', 'vis_loc': 'o'},
+                {'aud_loc': 'r', 'vis_loc': 'r'},
+                {'aud_loc': 'c', 'vis_loc': 'r'},
+                {'aud_loc': 'l', 'vis_loc': 'r'}]
+
+        fig, axs = plt.subplots(3, 3, figsize=figsize, sharex=True, sharey=True)
+        colors = ['gray','blue', 'red']
+
+        for mask in masks:
+            self.return_mask(**mask)
+            ax = axs[masks.index(mask) % 3, masks.index(mask) // 3]
+            if first_move:
+                timeline = self.trials.timeline_firstMoveOn - self.trials.timeline_audPeriodOn
+            else:
+                timeline = self.trials.timeline_choiceMoveOn - self.trials.timeline_audPeriodOn
+                
+            if neuron_ids is None:
+                neuron_ids = self.formatted_data.keys()
+            elif type(neuron_ids) is int:
+                neuron_ids = [neuron_ids]
+
+            if not sort_choice_loc and not sort_response_time:
+                sorted_index = self.mask_interest_indices
+            else:
+                df = pd.DataFrame({'response_direction': self.trials.response_direction.to_numpy()[self.mask_interest_indices],
+                                'timeline': timeline.to_numpy()[self.mask_interest_indices]})
+                if sort_choice_loc and sort_response_time:
+                    df_sorted = df.sort_values(by=['response_direction', 'timeline'])
+                    sorted_index = df_sorted.index
+                elif sort_choice_loc:
+                    df_sorted = df.sort_values(by=['response_direction'])
+                    sorted_index = df_sorted.index
+                else:
+                    df_sorted = df.sort_values(by=['timeline'])
+                    sorted_index = df_sorted.index
+
+            for neuron_id in neuron_ids:
+                baseline_spikes = self.formatted_data[neuron_id]['spikes']['baseline']
+                stimulus_spikes = self.formatted_data[neuron_id]['spikes']['stimulus']
+                
+                
+                for i in range(len(sorted_index)):
+                    trial_num = sorted_index[i]
+                    x_baseline = np.array(baseline_spikes[trial_num])
+                    x_stimulus = np.array(stimulus_spikes[trial_num])
+                    ax.plot(x_baseline, np.repeat(i, len(x_baseline)),'o', ms =2, 
+                            color=colors[int(self.trials.response_direction.to_numpy()[self.mask_interest_indices][trial_num])])
+                    ax.plot(x_stimulus, np.repeat(i, len(x_stimulus)),'o', ms =2, 
+                            color=colors[int(self.trials.response_direction.to_numpy()[self.mask_interest_indices][trial_num])])
+                    
+                ax.plot(timeline.to_numpy()[self.mask_interest_indices][sorted_index], range(len(sorted_index)), 'ko', ms = 2)
+
+            ax.axvline(0, color='k', linestyle='--', label="Stimulus Onset")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_xlim(xlim)
+
+        x_labels = ['Left', 'Off', 'Right']
+        y_labels = ['Right', 'Center', 'Left']
+        for i in range(3):
+            axs[2, i].set_xlabel(f'{x_labels[i]}')  # x labels for the bottom row
+            axs[i, 0].set_ylabel(f'{y_labels[i]}')  # y labels for the left column
+        fig.text(0.5, 0.04, 'Visual stimulus', ha='center', fontsize=12)
+        fig.text(0.06, 0.5, 'Auditory stimulus', va='center', rotation='vertical', fontsize=12)
+        plt.suptitle(f'Neuron ID: {neuron_ids or "All"} -- Session Date and Number: {self.session_date} & {self.session_no} -- Dominant Modality: {self.dominant_modality}')
+        plt.tight_layout(rect=[1, 0, 1, 0.95])
+        plt.show()
     
-    def test_firing_rate_change_stimulus(self, parametric_test = False, one_sided = False, up_regulated = False, multiple_correction = True, mc_test = 'fdr_bh', mc_alpha = 0.05):
+
+    
+    
+    def test_firing_rate_change_stimulus(self, parametric_test = False, one_sided = False, up_regulated = False, 
+                                         multiple_correction = True, mc_test = 'fdr_bh', mc_alpha = 0.05):
         """
         Calculate the change in firing rate for each neuron in the dataset and perform statistical tests to determine significance.
         
@@ -564,3 +692,19 @@ class session_data:
         
         p_vals = test_fr_change_stimulus(self, parametric_test, one_sided, up_regulated, multiple_correction, mc_test, mc_alpha)
         self.p_vals = p_vals
+
+    def find_significant_neurons(self, method: Literal['ccsp', 'csp', 'ttest'], reg_param: float = 1e-5,
+                                parametric_test = True,one_sided = True, multiple_correction = True,
+                                mc_test:Literal['bonferroni', 'sidak', 'holm', 'fdr_bh'] = 'bonferroni', 
+                                mc_alpha = 0.05):
+        if method == 'csp':
+            variance_ratio, increased_neurons, decreased_neurons = calculate_csp(self)
+        elif method == 'ccsp':
+            variance_ratio, increased_neurons, decreased_neurons = calculate_ccsp(self, reg_param=reg_param)
+        elif method == 'ttest':
+            variance_ratio, increased_neurons, decreased_neurons = calculate_ttest(self, parametric_test=parametric_test,
+                                                                                one_sided=one_sided, multiple_correction=multiple_correction,
+                                                                                mc_test=mc_test, mc_alpha=mc_alpha)
+        else:
+            raise ValueError('Invalid method. Choose from "ccsp", "csp", "ttest"')
+        return variance_ratio, increased_neurons, decreased_neurons
