@@ -4,7 +4,7 @@ import numpy as np
 from typing import Optional, Literal
 from pinkrigs_tools.utils import ev_utils, spk_utils
 
-def format_session(recordings, session_no = 0, expDef = 'multiSpaceWorld_checker_training', check_dominantModality=True):
+def format_session(recordings, session_no = 0, expDef = 'multiSpaceWorld_checker_training'):
     active_session  = recordings[recordings.expDef==expDef].iloc[session_no]
 
     session_date = active_session.expDate + '-' + str(active_session.expNum)
@@ -15,10 +15,10 @@ def format_session(recordings, session_no = 0, expDef = 'multiSpaceWorld_checker
     formatted_events = ev_utils.format_events(ev)
     formatted_cluster_data = spk_utils.format_cluster_data(clusters)
     
-    if check_dominantModality:
-        dominant_modality = determine_dominance(formatted_events)
+    animal_id = recordings.expFolder[0][-18:-13]
     
-    return formatted_events, formatted_cluster_data, spikes, dominant_modality, session_no, session_date
+
+    return formatted_events, formatted_cluster_data, spikes, session_no, session_date, animal_id
 
 def determine_dominance_row(audL, feedback, choice):
     """
@@ -44,14 +44,16 @@ def determine_dominance(events: pd.DataFrame) -> Optional[str]:
     Returns:
         str: 'aud' if audio is dominant, 'visual' otherwise.
     '''
-    val_events=events[events.is_validTrial]
-    conf_events = val_events[val_events.is_conflictTrial]
+    conf_events = events[events.is_conflictTrial]
     conf_events = conf_events[conf_events.choice != 0]
 
     conf_events['dominant'] = conf_events.apply(lambda row: determine_dominance_row(row['audL'], row['feedback'], row['choice']), axis=1)
-
-    if np.unique(conf_events.dominant).shape[0] > 1:
-        print('There is a conflict')
-    else:
-        return np.unique(conf_events.dominant)[0]
     
+    
+
+def normalize_p_values(p_values, min_p=1e-5, max_p=0.05):
+    """Normalize p-values between 0 and 1 (low p -> 1, high p -> 0)."""
+    norm_p = (np.log10(p_values) - np.log10(max_p)) / (np.log10(min_p) - np.log10(max_p))
+    norm_p = np.clip(norm_p, 0, 1)  # Ensure values stay within 0-1
+    
+    return norm_p

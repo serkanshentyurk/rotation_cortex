@@ -4,6 +4,7 @@ from typing import Optional, Literal
 from scipy.linalg import eigh
 from scipy.stats import ttest_rel, wilcoxon
 from statsmodels.stats.multitest import multipletests
+from stats import *
 
 import numpy as np
 import pandas as pd
@@ -59,7 +60,7 @@ def extract_spike(trials, neuron_spikes, baseline_start:float = -0.5):
     
     return stimulus_spikes, baseline_spikes
 
-def calculate_firing_rate(spike_times_dict, bin_size:float, period_start: Optional[float] = 0, period_end: Optional[float] = None, time_window: Optional[float] = 1, normalise = True):
+def calculate_firing_rate(spike_times_dict, bin_size:float, period_start: Optional[float] = 0, period_end: Optional[float] = None, time_window: Optional[float] = 1):
     """
     Calculate firing rates for neurons by counting spikes in small time bins.
     
@@ -100,214 +101,176 @@ def calculate_firing_rate(spike_times_dict, bin_size:float, period_start: Option
                     if bin_index < num_bins:
                         spike_counts[bin_index] += 1
             spike_counts = spike_counts / bin_size  # Convert spike counts to firing rates
-            if normalise:
-                pass
-                # means = np.mean(spike_counts)
-                # std_devs = np.std(spike_counts)
-                # spike_counts = (spike_counts - means) / std_devs
             all_spike_counts.append(spike_counts)
         firing_rates[neuron_id] = np.array(all_spike_counts)
 
     return dict(firing_rates), times
 
 
-def test_fr_change_stimulus(obj, parametric_test: bool = False, one_sided: bool = False, 
-                            up_regulated: bool = False, multiple_correction: bool = True, mc_test: str = 'fdr_bh', 
-                            mc_alpha: float = 0.05):
-    '''
-    Test for significant changes in firing rates between baseline and stimulus periods.
-    
-    Args:
-        obj (object): The object containing the formatted data.
-        parametric_test (bool): Whether to use a parametric test (default: False).
-        one_sided (bool): Whether to use a one-sided test (default: False).
-        up_regulated (bool): Whether to test for up-regulation (default: False).
-        multiple_correction (bool): Whether to apply multiple testing correction (default: True).
-        mc_test (str): The multiple testing correction method (default: 'fdr_bh').
-        mc_alpha (float): The significance level for multiple testing correction (default: 0.05).
-        
-    Returns:
-        dict: A dictionary containing p-values, test statistics, and significance status for each neuron.
-    '''
-    p_vals = defaultdict(list)
-    all_p_vals = []
-    n_significant = 0
-    # store_p_vals = np.empty([len(obj.formatted_data), 2])
-    # Loop through neurons to compare baseline and stimulus firing rates
-    for neuron_id in obj.formatted_data:
-        baseline_rate_all = obj.formatted_data[neuron_id]['firing_rate']['baseline'].mean(axis = 1)
-        baseline_rate = baseline_rate_all[obj.mask_interest_indices]
-        stimulus_rate_all = obj.formatted_data[neuron_id]['firing_rate']['stimulus'].mean(axis = 1)
-        stimulus_rate = stimulus_rate_all[obj.mask_interest_indices]
+def select_trials(obj, blank_trial = None, visual_trial = None, auditory_trial = None, coherent_trial = None, conflict_trial = None,
+                  vis_stim_loc = None, aud_stim_loc = None, choice = None):
+	trials = obj.trials_formatted
+	if blank_trial:
+		trials = trials[trials.is_blankTrial]
+	elif blank_trial == False:
+		trials = trials[~trials.is_blankTrial]
+	if visual_trial:
+		trials = trials[trials.is_visualTrial]
+	elif visual_trial == False:
+		trials = trials[~trials.is_visualTrial]
+	if auditory_trial:
+		trials = trials[trials.is_auditoryTrial]
+	elif auditory_trial == False:
+		trials = trials[~trials.is_auditoryTrial]
+	if coherent_trial:
+		trials = trials[trials.is_coherentTrial]
+	elif coherent_trial == False:
+		trials = trials[~trials.is_coherentTrial]
+	if conflict_trial:
+		trials = trials[trials.is_conflictTrial]
+	elif conflict_trial == False:
+		trials = trials[~trials.is_conflictTrial]
+	if vis_stim_loc in ['left', 'l']:
+		trials = trials[trials.vis_loc == 'l']
+	elif vis_stim_loc in ['right', 'r']:
+		trials = trials[trials.vis_loc == 'r']
+	elif vis_stim_loc in ['c', 'o', 'center', 'centre', 'off']:
+		trials = trials[trials.vis_loc == 'o']
+	if aud_stim_loc in ['left', 'l']:
+		trials = trials[trials.aud_loc == 'l']
+	elif aud_stim_loc in ['right', 'r']:
+		trials = trials[trials.aud_loc == 'r']
+	elif aud_stim_loc in ['c', 'o', 'center', 'centre', 'off']:
+		trials = trials[trials.aud_loc == 'c']
+	if choice in ['left', 'l', 0]:
+		trials = trials[trials.choice == 0]
+	elif choice in ['right', 'r', 1]:
+		trials = trials[trials.choice == 1]
+	elif choice in ['no', 'n', -1]:
+		trials = trials[trials.choice == -1]
+	return trials, np.array(trials.index)
 
-        # Check if baseline and stimulus rates have the same length
-        min_length = min(len(baseline_rate), len(stimulus_rate))
-        baseline_rate = baseline_rate[:min_length]
-        stimulus_rate = stimulus_rate[:min_length]
 
-        if parametric_test:
-            if one_sided:
-                if up_regulated:
-                    # Perform one-sided t-test
-                    stat, p_val = ttest_rel(baseline_rate, stimulus_rate, alternative='greater')
-                else:
-                    # Perform one-sided t-test
-                    stat, p_val = ttest_rel(baseline_rate, stimulus_rate, alternative='less') 
+def test_fr_change_ttest(baseline_rate,stimulus_rate, parametric_test = True, one_sided = True, up_regulated = True,
+                         multiple_correction = True, mc_alpha = 0.05, mc_method = 'fdr_bh'):  
+    if parametric_test:
+        if one_sided:
+            if up_regulated:
+                # Perform one-sided t-test
+                stat, p_val = ttest_rel(baseline_rate, stimulus_rate, alternative='greater')
             else:
-                # Perform paired t-test or Wilcoxon signed-rank test
-                stat, p_val = ttest_rel(baseline_rate, stimulus_rate)      
-        else: # Non-parametric test
-            if one_sided:
-                if up_regulated:
-                    # Perform one-sided Wilcoxon test
-                    stat, p_val = wilcoxon(baseline_rate, stimulus_rate, alternative='greater')
-                else:
-                    # Perform one-sided Wilcoxon test
-                    stat, p_val = wilcoxon(baseline_rate, stimulus_rate, alternative='less')
+                # Perform one-sided t-test
+                stat, p_val = ttest_rel(baseline_rate, stimulus_rate, alternative='less') 
+        else:   
+            # Perform paired t-test or Wilcoxon signed-rank test
+            stat, p_val = ttest_rel(baseline_rate, stimulus_rate)      
+    else: # Non-parametric test
+        if one_sided:
+            if up_regulated:
+                # Perform one-sided Wilcoxon test
+                stat, p_val = wilcoxon(baseline_rate, stimulus_rate, alternative='greater')
             else:
-                # Alternatively, use the following for the Wilcoxon test:
-                stat, p_val = wilcoxon(baseline_rate, stimulus_rate)
-        
-        p_vals[neuron_id] = (p_val, stat, p_val < 0.05)
-        if p_val < 0.05:
-            n_significant += 1
-        all_p_vals.append(p_val)
-        # store_p_vals[neuron_id] = [neuron_id, p_val]
-        
-    # Apply multiple testing correction if specified
-    n_significant_mc = 0
+                # Perform one-sided Wilcoxon test
+                stat, p_val = wilcoxon(baseline_rate, stimulus_rate, alternative='less')
+        else:
+            # Alternatively, use the following for the Wilcoxon test:
+            stat, p_val = wilcoxon(baseline_rate, stimulus_rate)
+    n_significant = np.sum(p_val < 0.05)  
+          
     if multiple_correction:
-        rejected, corrected_p_vals, _, _ = multipletests(all_p_vals, alpha=mc_alpha, method=mc_test)
+        rejected, corrected_p_vals, _, _ = multipletests(p_val, alpha=mc_alpha, method=mc_method)
         n_significant_mc = rejected.sum()
-        # Update p_vals with corrected p-values and significance status
-        for idx, neuron_id in enumerate(p_vals.keys()):
-            _, stat, _ = p_vals[neuron_id]
-            
-            p_vals[neuron_id] = (corrected_p_vals[idx], stat, rejected[idx])
-            # store_p_vals[neuron_id] = [neuron_id, corrected_p_vals[idx]]
-            
-    n_total = len(p_vals)
-    p_vals['info'] = {'n_significant': n_significant, 'n_significant_mc': n_significant_mc, 'n_total' : n_total,
-                    'multiple_correction': multiple_correction, 'mc_test': mc_test, 'mc_alpha': mc_alpha, 
-                    'one_sided': one_sided, 'up_regulated': up_regulated, 'mask_info': obj.mask_info}
-    p_vals = dict(p_vals)
-    return p_vals
+    else:
+        rejected = None
+        n_significant_mc = None
+        corrected_p_vals = None
+    return stat, p_val, rejected, corrected_p_vals, n_significant, n_significant_mc
 
-
-def calculate_csp(obj):
-	X_baseline_all = obj.formatted_data_array['firing_rate']['baseline'] # neuron - trial - fr step
-	X_stimulus_all = obj.formatted_data_array['firing_rate']['stimulus']
-	X_baseline_all_avg = np.mean(X_baseline_all, axis=1) # average firing rate of neuron X over all trials
-	X_stimulus_all_avg = np.mean(X_stimulus_all, axis=1)
-
-	# 1. Compute covariance matrices for baseline and stimulus
-	C_baseline = np.cov(X_baseline_all_avg.T)
-	C_stimulus = np.cov(X_stimulus_all_avg.T)
-
-	# 2. Perform eigenvalue decomposition to get CSP filters
-	eigenvalues, eigenvectors = eigh(C_baseline, C_stimulus)
-
-	# 3. Sort the eigenvalues and eigenvectors
-	sorted_indices = np.argsort(eigenvalues)[::-1]
-	eigenvectors_sorted = eigenvectors[:, sorted_indices]
-
-	# 4. Project the data onto the CSP space (top filters)
-	X_baseline_csp = np.dot(X_baseline_all_avg, eigenvectors_sorted[:, :2])  
-	X_stimulus_csp = np.dot(X_stimulus_all_avg, eigenvectors_sorted[:, :2])
-
-	# 5. Calculate variance for each neuron in the CSP space
-	baseline_variance = np.var(X_baseline_csp, axis=1)
-	stimulus_variance = np.var(X_stimulus_csp, axis=1)
-
-	# 6. Compare variances to identify neurons with significant changes
-	variance_ratio = stimulus_variance / baseline_variance  # Ratio of stimulus to baseline variance
-
-	# 7. Neurons with a high variance ratio are considered responsive to the stimulus
-	responsive_neurons = np.where(variance_ratio > 1.5)[0]  # Choose an appropriate threshold
-
-	mean_baseline = np.mean(X_baseline_all_avg, axis=1)  # Mean firing rate of neuron X_avg(over trials) during baseline
-	mean_stimulus = np.mean(X_stimulus_all_avg, axis=1)  # Mean firing rate of neuron X_avg(over trials) during stimulus
-	increased_neurons = np.array([neuron for neuron in responsive_neurons if mean_stimulus[neuron] > mean_baseline[neuron]])
-	decreased_neurons = np.array([neuron for neuron in responsive_neurons if mean_stimulus[neuron] < mean_baseline[neuron]])
- 
-	return variance_ratio, increased_neurons, decreased_neurons
-
-
-def calculate_ccsp(obj, reg_param=1e-5):
-	X_baseline_all = obj.formatted_data_array['firing_rate']['baseline'] # neuron - trial - fr step
-	X_stimulus_all = obj.formatted_data_array['firing_rate']['stimulus']
-	X_baseline_all_avg = np.mean(X_baseline_all, axis=1) # average firing rate of neuron X over all trials
-	X_stimulus_all_avg = np.mean(X_stimulus_all, axis=1)
- 
-	# 1. Compute correlation matrices
-	R_baseline = np.corrcoef(X_baseline_all.reshape(786, -1))  # Neurons x Neurons
-	R_stimulus = np.corrcoef(X_stimulus_all.reshape(786, -1))  # Neurons x Neurons
-
-	R_baseline = np.nan_to_num(R_baseline, nan=0.0, posinf=0.0, neginf=0.0)
-	R_stimulus = np.nan_to_num(R_stimulus, nan=0.0, posinf=0.0, neginf=0.0)
-
-	R_baseline += reg_param * np.eye(R_baseline.shape[0])
-	R_stimulus += reg_param * np.eye(R_stimulus.shape[0])
-
-
-	# 2. Compute eigenvalue decomposition for CCSP
-	eigenvalues, eigenvectors = eigh(R_stimulus, R_baseline)
-
-	# eigenvalues, eigenvectors = np.linalg.eig(np.linalg.inv(R_baseline) @ R_stimulus)
-
-	# 3. Sort eigenvalues and eigenvectors
-	idx = np.argsort(eigenvalues)[::-1]
-	eigenvectors = eigenvectors[:, idx]
-
-	# 4. Apply spatial filters to project data
-	W = eigenvectors  # Spatial filters
-	Y_baseline = W.T @ X_baseline_all.reshape(786, -1)
-	Y_stimulus = W.T @ X_stimulus_all.reshape(786, -1)
-
-	# 5. Analyze variance changes
-	variance_baseline = np.var(Y_baseline, axis=1)
-	variance_stimulus = np.var(Y_stimulus, axis=1)
-	variance_ratio = variance_stimulus / variance_baseline
-
-	# Find neurons/components with significant changes
-	responsive_components = np.where(variance_ratio > 1.5)[0]
-	mean_baseline = np.mean(X_baseline_all_avg, axis=1)  # Mean firing rate of neuron X_avg(over trials) during baseline
-	mean_stimulus = np.mean(X_stimulus_all_avg, axis=1)  # Mean firing rate of neuron X_avg(over trials) during stimulus
-	increased_neurons = np.array([neuron for neuron in responsive_components if mean_stimulus[neuron] > mean_baseline[neuron]])
-	decreased_neurons = np.array([neuron for neuron in responsive_components if mean_stimulus[neuron] < mean_baseline[neuron]])
-
-	return variance_ratio, increased_neurons, decreased_neurons
 
 def calculate_ttest(obj,parametric_test = True,one_sided = True, multiple_correction = True,
                     mc_test:Literal['bonferroni', 'sidak', 'holm', 'fdr_bh'] = 'bonferroni', mc_alpha = 0.05):
 	up_regulated = True
 	obj.test_firing_rate_change_stimulus(parametric_test, one_sided, up_regulated, multiple_correction, mc_test, mc_alpha)
-	# Initialize an empty list to store neuron IDs with significant results
 	increased_neurons = []
+	increased_p_vals = []
+ 
 	# Iterate through all items in obj.pvals
 	for neuron_id, value in obj.p_vals.items():
 		# Check if the value is a tuple with 3 elements
 		if len(value) == 3:
 			# Unpack the tuple into x, y, and significance
-			_,_, significance = value
+			p_value,_, significance = value
 			# Check if the significance is True
 			if significance:
 				# If significance is True, append the neuron_id to the list
 				increased_neurons.append(neuron_id)
+				increased_p_vals.append(p_value)
 	if one_sided:
 		up_regulated = False
 		obj.test_firing_rate_change_stimulus(parametric_test, one_sided, up_regulated, multiple_correction, mc_test, mc_alpha)
 		# Initialize an empty list to store neuron IDs with significant results
 		decreased_neurons = []
+		decreased_p_vals = []
 		# Iterate through all items in obj.pvals
 		for neuron_id, value in obj.p_vals.items():
 			# Check if the value is a tuple with 3 elements
 			if len(value) == 3:
 				# Unpack the tuple into x, y, and significance
-				_,_, significance = value
+				p_value,_, significance = value
 				# Check if the significance is True
 				if significance:
 					# If significance is True, append the neuron_id to the list
 					decreased_neurons.append(neuron_id)
-	return _, increased_neurons, decreased_neurons
+					decreased_p_vals.append(p_value)
+	return [increased_p_vals, decreased_p_vals], increased_neurons, decreased_neurons
 		
+
+def calculate_cccp_ccsp(obj):
+	p_of_choice_probability = []
+	aud_p_of_stim_probability = []
+	vis_p_of_stim_probability = []
+	trial_choice = obj.trials_formatted['choice'].values
+
+	for neuron_idx in range(len(obj.formatted_data)):
+		neuron = obj.formatted_data[neuron_idx]
+		spike_counts = []
+		for trial_idx in range(len(neuron['spikes']['baseline'])):
+			spike_times_relative = np.array(neuron['spikes']['baseline'][trial_idx] + neuron['spikes']['stimulus'][trial_idx])
+			n_spike_per_trial = len(spike_times_relative)
+			spike_counts.append(n_spike_per_trial)
+		spike_counts = np.array(spike_counts)
+  
+		_, p_of_choice_prob = cal_combined_conditions_choice_prob_numpy(spike_counts,
+																			obj.trials_formatted['cond_id'],
+																			trial_choice,
+																			verbose = False)
+  
+		_, vis_p_of_stim_prob = cal_combined_conditions_choice_stim_numpy(spike_counts,
+																		obj.trials_formatted['aud_loc'].values,
+																		obj.trials_formatted['vis_loc'].values,
+																		trial_choice,
+																		unique_vis_cond = ['l', 'r'],
+																		unique_aud_cond = ['l', 'r'],
+																		unique_choice_cond = [-1,0,1],
+																		verbose=False,
+																		test_type='visLeftRight')
+		_, aud_p_of_stim_prob = cal_combined_conditions_choice_stim_numpy(spike_counts,
+																		obj.trials_formatted['aud_loc'].values,
+																		obj.trials_formatted['vis_loc'].values,
+																		trial_choice,
+																		unique_vis_cond = ['l', 'r'],
+																		unique_aud_cond = ['l', 'r'],
+																		unique_choice_cond = [-1,0,1],
+																		verbose=False,
+																		test_type='audLeftRight')
+		p_of_choice_probability.append(p_of_choice_prob)
+		aud_p_of_stim_probability.append(aud_p_of_stim_prob)
+		vis_p_of_stim_probability.append(vis_p_of_stim_prob)
+
+	p_of_choice_probability = np.array(p_of_choice_probability)[np.where(obj.all_cluster_data.bombcell_class == 'good')[0]]
+	aud_p_of_stim_probability = np.array(aud_p_of_stim_probability)[np.where(obj.all_cluster_data.bombcell_class == 'good')[0]]
+	vis_p_of_stim_probability = np.array(vis_p_of_stim_probability)[np.where(obj.all_cluster_data.bombcell_class == 'good')[0]]
+ 
+	return p_of_choice_probability, aud_p_of_stim_probability, vis_p_of_stim_probability
+
+

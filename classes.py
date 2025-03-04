@@ -15,9 +15,7 @@ class exp_data:
         self.session_dates = []
         self.dominance = []
         
-    def add_session(self, session_object, baseline_start = -0.5, stimulus_end = 0.5, bin_size = 0.01):
-        session_object.format_spikes(baseline_start, stimulus_end, bin_size)
-        
+    def add_session(self, session_object):
         self.session_data_obj[session_object.session_no] = session_object
         self.session_dates.append(session_object.session_date)
         self.dominance.append(session_object.dominant_modality)    
@@ -146,7 +144,10 @@ class session_data:
     A class to store all data for a single session. 
     This includes the formatted event data, cluster data, and spike data. 
     '''
-    def __init__(self, formatted_events, formatted_cluster_data, spikes, dominant_modality, session_no, session_date, only_validTrails = True):
+    def __init__(self, formatted_events, formatted_cluster_data, spikes, 
+                 dominant_modality, session_no, session_date, 
+                 only_validTrails = True,
+                 baseline_start = -0.5, stimulus_end = 0.5, binsize = 0.01, normalise = True, bombcell = True):
         '''
         Initialize the session data object with the provided data. Inputs the output of the format_data function.
         
@@ -164,9 +165,14 @@ class session_data:
         self.dominant_modality = dominant_modality
         self.session_no = session_no
         self.session_date = session_date
-        
         self.spikes = defaultdict(list)
         self.only_validTrial = only_validTrails
+        
+        self.format_trials()
+        self.create_mask()
+        self.format_spikes(baseline_start=baseline_start, stimulus_end = stimulus_end, bin_size = binsize, normalise = normalise, bombcell = bombcell)
+
+    def format_trials(self):
         if self.only_validTrial:
             trials = self.all_event_data[self.all_event_data.is_validTrial]
         else:
@@ -190,41 +196,40 @@ class session_data:
         # Create the new columns
         trials['vis_loc'] = np.select(vis_conditions, vis_choices, default='o')
         trials['aud_loc'] = np.select(aud_conditions, aud_choices, default='c')
-        
-        self.trials = trials
-        self.create_mask()
+        self.trials_formatted = trials
+    
     
     def create_mask(self):
         visual_mask = []
-        vis_all = np.array(self.trials.is_visualTrial)
-        vis_left = np.array(self.trials.vis_loc == 'l')
-        vis_right = np.array(self.trials.vis_loc == 'r')
-        vis_off = np.array(self.trials.vis_loc == 'o')
+        vis_all = np.array(self.trials_formatted.is_visualTrial)
+        vis_left = np.array(self.trials_formatted.vis_loc == 'l')
+        vis_right = np.array(self.trials_formatted.vis_loc == 'r')
+        vis_off = np.array(self.trials_formatted.vis_loc == 'o')
         visual_mask.append([vis_all, vis_left, vis_right, vis_off])
         self.visual_mask = visual_mask
         
         audio_mask = []
-        audio_all = np.array(self.trials.is_auditoryTrial)
-        audio_left = np.array(self.trials.aud_loc == 'l')
-        audio_right = np.array(self.trials.aud_loc == 'r')
-        audio_center = np.array(self.trials.aud_loc == 'c')
+        audio_all = np.array(self.trials_formatted.is_auditoryTrial)
+        audio_left = np.array(self.trials_formatted.aud_loc == 'l')
+        audio_right = np.array(self.trials_formatted.aud_loc == 'r')
+        audio_center = np.array(self.trials_formatted.aud_loc == 'c')
         audio_mask.append([audio_all, audio_left, audio_right, audio_center])
         self.audio_mask = audio_mask
         
         coherent_mask = []
-        coherent_mask.append(np.array(self.trials.is_coherentTrial))
+        coherent_mask.append(np.array(self.trials_formatted.is_coherentTrial))
         self.coherent_mask = coherent_mask
         
         conflict_mask = []
-        conflict_mask.append(np.array(self.trials.is_conflictTrial))
+        conflict_mask.append(np.array(self.trials_formatted.is_conflictTrial))
         self.conflict_mask = conflict_mask
         
         choice_left = []
         choice_right = []
         choice_no = []
-        choice_left.append(np.array(self.trials.choice == -1))
-        choice_right.append(np.array(self.trials.choice == 1))
-        choice_no.append(np.array(self.trials.choice == 0))
+        choice_left.append(np.array(self.trials_formatted.choice == -1))
+        choice_right.append(np.array(self.trials_formatted.choice == 1))
+        choice_no.append(np.array(self.trials_formatted.choice == 0))
         self.choice_left = choice_left
         self.choice_right = choice_right
         self.choice_no = choice_no
@@ -232,9 +237,9 @@ class session_data:
         result_correct_mask = []
         result_incorrect_mask = []
         result_none_mask = []
-        result_correct_mask.append(np.array(self.trials.feedback == 1))
-        result_incorrect_mask.append(np.array(self.trials.feedback == -1))
-        result_none_mask.append(np.array(self.trials.feedback == 0))
+        result_correct_mask.append(np.array(self.trials_formatted.feedback == 1))
+        result_incorrect_mask.append(np.array(self.trials_formatted.feedback == -1))
+        result_none_mask.append(np.array(self.trials_formatted.feedback == 0))
         self.result_correct_mask = result_correct_mask
         self.result_incorrect_mask = result_incorrect_mask
         self.result_none_mask = result_none_mask
@@ -342,8 +347,8 @@ class session_data:
             map_stim = np.logical_and(map_stim, self.choice_no[0])
         else:
             raise ValueError('choice_loc must be either "left", "right", "no_choice", "all" or None')
-        self.mask_interest = map_stim
-        self.mask_interest_indices = np.arange(0,self.mask_interest.shape[0],1)[self.mask_interest]
+        self.trials_map = map_stim
+        self.trials_map_indices = np.arange(0,self.trials_map.shape[0],1)[self.trials_map]
         self.mask_info = {'modality': modality, 
                           'stim_loc': stim_loc, 
                           'choice_correct': choice_correct, 
@@ -352,10 +357,14 @@ class session_data:
                           'vis_loc': vis_loc,
                           'aud_loc': aud_loc}
 
-    def format_spikes(self, baseline_start = -0.5, stimulus_end = 0.5, bin_size = 0.01, normalise = True):
+    def format_spikes(self, baseline_start = -0.5, stimulus_end = 0.5, bin_size = 0.01, normalise = True, bombcell = True):
         '''
         Format the spike data for the session. This will create a dictionary of spike times for each neuron.
         '''
+        self.baseline_start = baseline_start
+        self.stimulus_stop = stimulus_end
+        
+        
         self.spikes = format_spike(self.all_spike_data)
         stimulus_spikes, baseline_spikes = self.extract_spikes(baseline_start)
 
@@ -367,6 +376,12 @@ class session_data:
         
         
         formatted_spikes = defaultdict(dict)
+        if bombcell:
+            bombcells = np.where(self.all_cluster_data.bombcell_class == 'good')[0]
+            keys = sorted(bombcells)
+        else:
+            bombcells = stimulus_firing_rates
+            keys = sorted(bombcells.keys())
         for neuron_id in stimulus_firing_rates:
             formatted_spikes[neuron_id] = {"spikes": {"baseline": baseline_spikes[neuron_id],
                                                       "stimulus": stimulus_spikes[neuron_id]},
@@ -378,27 +393,33 @@ class session_data:
         self.stimulus_times = stimulus_times
         self.baseline_times = baseline_times
         
-        keys = sorted(baseline_firing_rates.keys())  # Ensure keys are sorted
         baseline_arrays = [baseline_firing_rates[key] for key in keys]  # Extract arrays in the order of keys
         stimulus_arrays = [stimulus_firing_rates[key] for key in keys]  # Extract arrays in the order of keys
 
         baseline_3d = np.stack(baseline_arrays, axis=0)
         stimulus_3d = np.stack(stimulus_arrays, axis=0)
         
-        self.formatted_data_array = {'firing_rate': {'baseline': baseline_3d, 'stimulus': stimulus_3d},
-                                     'neuron_ids': keys}
+        timeline_first_move = self.trials_formatted.timeline_firstMoveOn - self.trials_formatted.timeline_audPeriodOn
+        timeline_choice_move = self.trials_formatted.timeline_choiceMoveOn - self.trials_formatted.timeline_audPeriodOn
+        self.spikes_formatted = {'firing_rate': {'baseline': baseline_3d, 
+                                                     'stimulus': stimulus_3d},
+                                     'neuron_ids': np.array(keys),
+                                     'start_time': {'first_move': timeline_first_move.values, 
+                                                    'choice_move': timeline_choice_move.values}}
 
-    def extract_spikes(self, baseline_start = -0.5):
+    def extract_spikes(self, baseline_start = None):
         '''
         Extract the spikes for each neuron during the baseline and stimulus periods.
         
         Args:
         - pre_stimulus_window: The duration of the pre-stimulus window to consider for the baseline period.
         '''
-        self.baseline_start = baseline_start
-        stimulus_spikes, baseline_spikes = extract_spike(self.trials, self.spikes, self.baseline_start)
-        self.stimulus_on = self.trials.timeline_audPeriodOn
-        self.stimulus_off = self.trials.timeline_audPeriodOff
+        if baseline_start is not None:
+            self.baseline_start = baseline_start
+            
+        stimulus_spikes, baseline_spikes = extract_spike(self.trials_formatted, self.spikes, self.baseline_start)
+        self.stimulus_on = self.trials_formatted.timeline_audPeriodOn
+        self.stimulus_off = self.trials_formatted.timeline_audPeriodOff
         self.stimulus_duration = self.stimulus_off - self.stimulus_on
         
         return stimulus_spikes, baseline_spikes
@@ -433,8 +454,8 @@ class session_data:
                 total_times = np.concatenate([neuron_data['times']['baseline'], neuron_data['times']['stimulus']])
             
                 if color_based_on is None:
-                    total_firing_rates = np.concatenate([neuron_data['firing_rate']['baseline'][self.mask_interest].mean(axis = 0), 
-                                            neuron_data['firing_rate']['stimulus'][self.mask_interest].mean(axis = 0)])
+                    total_firing_rates = np.concatenate([neuron_data['firing_rate']['baseline'][self.trials_map].mean(axis = 0), 
+                                            neuron_data['firing_rate']['stimulus'][self.trials_map].mean(axis = 0)])
                     
                     average_fr += total_firing_rates
                     if not only_average:
@@ -450,11 +471,11 @@ class session_data:
                     filter_2 = filter_to_apply.copy()
                     filter_3 = filter_to_apply.copy()
 
-                    if color_based_on in ['vision', 'visual', 'v']:
+                    if color_based_on in ['vision', 'visual', 'vis', 'v']:
                         filter_1['vis_loc'] = 'l'
                         filter_2['vis_loc'] = 'o'
                         filter_3['vis_loc'] = 'r'
-                    elif color_based_on == 'audio':
+                    elif color_based_on in ['audio', 'aud', 'a']:
                         filter_1['aud_loc'] = 'l'
                         filter_2['aud_loc'] = 'c'
                         filter_3['aud_loc'] = 'r'
@@ -462,16 +483,16 @@ class session_data:
                         raise ValueError('Invalid color_based_on')
                 
                     self.return_mask(**filter_1)
-                    total_firing_rates_l = np.concatenate([neuron_data['firing_rate']['baseline'][self.mask_interest].mean(axis = 0), 
-                                            neuron_data['firing_rate']['stimulus'][self.mask_interest].mean(axis = 0)])
+                    total_firing_rates_l = np.concatenate([neuron_data['firing_rate']['baseline'][self.trials_map].mean(axis = 0), 
+                                            neuron_data['firing_rate']['stimulus'][self.trials_map].mean(axis = 0)])
                     average_fr_l += total_firing_rates_l
                     self.return_mask(**filter_2)
-                    total_firing_rates_c = np.concatenate([neuron_data['firing_rate']['baseline'][self.mask_interest].mean(axis = 0), 
-                                            neuron_data['firing_rate']['stimulus'][self.mask_interest].mean(axis = 0)])
+                    total_firing_rates_c = np.concatenate([neuron_data['firing_rate']['baseline'][self.trials_map].mean(axis = 0), 
+                                            neuron_data['firing_rate']['stimulus'][self.trials_map].mean(axis = 0)])
                     average_fr_c += total_firing_rates_c
                     self.return_mask(**filter_3)
-                    total_firing_rates_r = np.concatenate([neuron_data['firing_rate']['baseline'][self.mask_interest].mean(axis = 0), 
-                                            neuron_data['firing_rate']['stimulus'][self.mask_interest].mean(axis = 0)])
+                    total_firing_rates_r = np.concatenate([neuron_data['firing_rate']['baseline'][self.trials_map].mean(axis = 0), 
+                                            neuron_data['firing_rate']['stimulus'][self.trials_map].mean(axis = 0)])
                     average_fr_r += total_firing_rates_r
                     
                     if not only_average:
@@ -535,19 +556,19 @@ class session_data:
 
 
         if first_move:
-            timeline = self.trials.timeline_firstMoveOn - self.trials.timeline_audPeriodOn
+            timeline = self.trials_formatted.timeline_firstMoveOn - self.trials_formatted.timeline_audPeriodOn
         else:
-            timeline = self.trials.timeline_choiceMoveOn - self.trials.timeline_audPeriodOn
+            timeline = self.trials_formatted.timeline_choiceMoveOn - self.trials_formatted.timeline_audPeriodOn
             
         if neuron_ids is None:
             neuron_ids = self.formatted_data.keys()
             
             
         if not sort_choice_loc and not sort_response_time:
-            sorted_index = self.mask_interest_indices
+            sorted_index = self.trials_map_indices
         else:
-            df = pd.DataFrame({'response_direction': self.trials.response_direction.to_numpy()[self.mask_interest_indices],
-                            'timeline': timeline.to_numpy()[self.mask_interest_indices]})
+            df = pd.DataFrame({'response_direction': self.trials_formatted.response_direction.to_numpy()[self.trials_map_indices],
+                            'timeline': timeline.to_numpy()[self.trials_map_indices]})
             if sort_choice_loc and sort_response_time:
                 df_sorted = df.sort_values(by=['response_direction', 'timeline'])
                 sorted_index = df_sorted.index
@@ -572,11 +593,11 @@ class session_data:
                 x_baseline = np.array(baseline_spikes[trial_num])
                 x_stimulus = np.array(stimulus_spikes[trial_num])
                 plt.plot(x_baseline, np.repeat(i, len(x_baseline)),'o', ms =2, 
-                        color=colors[int(self.trials.response_direction.to_numpy()[self.mask_interest_indices][trial_num])])
+                        color=colors[int(self.trials_formatted.response_direction.to_numpy()[self.trials_map_indices][trial_num])])
                 plt.plot(x_stimulus, np.repeat(i, len(x_stimulus)),'o', ms =2, 
-                        color=colors[int(self.trials.response_direction.to_numpy()[self.mask_interest_indices][trial_num])])
+                        color=colors[int(self.trials_formatted.response_direction.to_numpy()[self.trials_map_indices][trial_num])])
                 
-            plt.plot(timeline.to_numpy()[self.mask_interest_indices][sorted_index], range(len(sorted_index)), 'ko', ms = 2)
+            plt.plot(timeline.to_numpy()[self.trials_map_indices][sorted_index], range(len(sorted_index)), 'ko', ms = 2)
 
         plt.axvline(0, color='k', linestyle='--', label="Stimulus Onset")
         plt.title(', '.join([f'{k}: {v}' for k, v in self.mask_info.items()]), fontsize = 10)
@@ -611,9 +632,9 @@ class session_data:
             self.return_mask(**mask)
             ax = axs[masks.index(mask) % 3, masks.index(mask) // 3]
             if first_move:
-                timeline = self.trials.timeline_firstMoveOn - self.trials.timeline_audPeriodOn
+                timeline = self.trials_formatted.timeline_firstMoveOn - self.trials_formatted.timeline_audPeriodOn
             else:
-                timeline = self.trials.timeline_choiceMoveOn - self.trials.timeline_audPeriodOn
+                timeline = self.trials_formatted.timeline_choiceMoveOn - self.trials_formatted.timeline_audPeriodOn
                 
             if neuron_ids is None:
                 neuron_ids = self.formatted_data.keys()
@@ -621,10 +642,10 @@ class session_data:
                 neuron_ids = [neuron_ids]
 
             if not sort_choice_loc and not sort_response_time:
-                sorted_index = self.mask_interest_indices
+                sorted_index = self.trials_map_indices
             else:
-                df = pd.DataFrame({'response_direction': self.trials.response_direction.to_numpy()[self.mask_interest_indices],
-                                'timeline': timeline.to_numpy()[self.mask_interest_indices]})
+                df = pd.DataFrame({'response_direction': self.trials_formatted.response_direction.to_numpy()[self.trials_map_indices],
+                                'timeline': timeline.to_numpy()[self.trials_map_indices]})
                 if sort_choice_loc and sort_response_time:
                     df_sorted = df.sort_values(by=['response_direction', 'timeline'])
                     sorted_index = df_sorted.index
@@ -645,11 +666,11 @@ class session_data:
                     x_baseline = np.array(baseline_spikes[trial_num])
                     x_stimulus = np.array(stimulus_spikes[trial_num])
                     ax.plot(x_baseline, np.repeat(i, len(x_baseline)),'o', ms =2, 
-                            color=colors[int(self.trials.response_direction.to_numpy()[self.mask_interest_indices][trial_num])])
+                            color=colors[int(self.trials_formatted.response_direction.to_numpy()[self.trials_map_indices][trial_num])])
                     ax.plot(x_stimulus, np.repeat(i, len(x_stimulus)),'o', ms =2, 
-                            color=colors[int(self.trials.response_direction.to_numpy()[self.mask_interest_indices][trial_num])])
+                            color=colors[int(self.trials_formatted.response_direction.to_numpy()[self.trials_map_indices][trial_num])])
                     
-                ax.plot(timeline.to_numpy()[self.mask_interest_indices][sorted_index], range(len(sorted_index)), 'ko', ms = 2)
+                ax.plot(timeline.to_numpy()[self.trials_map_indices][sorted_index], range(len(sorted_index)), 'ko', ms = 2)
 
             ax.axvline(0, color='k', linestyle='--', label="Stimulus Onset")
             ax.set_xticks([])
