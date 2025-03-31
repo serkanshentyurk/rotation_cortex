@@ -1,4 +1,4 @@
-# Project Title
+# Serkan's Rotation: CCXP and sth
 
 This repository contains code for processing, analyzing, and visualizing neural data. The project is organized into several folders, each containing modules for specific functionalities.
 
